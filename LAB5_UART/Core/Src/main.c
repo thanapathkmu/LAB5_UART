@@ -18,7 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "stdio.h"
+#include "string.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -42,8 +43,17 @@
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint8_t RxBuffer[1]; //recieve
-uint8_t TxBuffer[20]; //send
+uint8_t RxBuffer[2]; //receive
+uint8_t TxBuffer[40]; //send
+uint8_t status = 0; //menu status
+float speed = 5; //Frequency of LED
+uint8_t LED_status = 1;
+uint32_t timestamp = 0;
+float Hz = 0;
+//Button state
+uint8_t current_flag = 0;
+uint8_t last_flag = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -52,6 +62,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void LED();
+void UARTInterruptConfig();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -89,7 +100,10 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  UARTInteruptConfig();
+  uint8_t wrong_text[] = "Wrong!\r\n\0";
+  uint8_t menu0_text[] = "Now LED Control Mode\r\n\0";
+  uint8_t menu1_text[] = "Now Button Status Mode\r\n\0";
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -99,7 +113,83 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
+	  LED();
+	  current_flag = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+	  switch(status)
+	  {
+	  //@Menu
+	  	  case 0:
+	  		  if(RxBuffer[0] == '0')
+	  		  {
+	  			HAL_UART_Transmit_IT(&huart2 , menu0_text , strlen((char*)menu0_text));
+	  			status = 1;
+	  			RxBuffer[0] = "";
+	  		  }
+	  		  else if(RxBuffer[0] == '1')
+	  		  {
+	  			HAL_UART_Transmit_IT(&huart2 , menu1_text , strlen((char*)menu1_text));
+	  			status = 2;
+	  			RxBuffer[0] = "";
+	  		  }
+			break;
+	  //@LED Control Panel
+	  	  case 1:
+			if (RxBuffer[0] == 'a') {
+				LED();
+				sprintf((char*) TxBuffer, "LED Speed : Up now\r\n\0");
+								HAL_UART_Transmit_IT(&huart2, TxBuffer,
+										strlen((char*) TxBuffer));
+				speed += 1;
+				RxBuffer[0] = "";
+			} else if (RxBuffer[0] == 's') {
+				LED();
+				sprintf((char*) TxBuffer, "LED Speed : Down now\r\n\0");
+				HAL_UART_Transmit_IT(&huart2, TxBuffer,
+						strlen((char*) TxBuffer));
+				speed -= 1;
+				RxBuffer[0] = "";
+			} else if (RxBuffer[0] == 'd') {
+				if(LED_status == 0){
+					LED();
+					HAL_UART_Transmit_IT(&huart2, "LED ON\r\n\0",
+							strlen((char*) "LED ON\r\n\0"));
+					LED_status = 1;
+					RxBuffer[0] = "";
+				}
+				else if(LED_status == 1){
+					LED();
+					HAL_UART_Transmit_IT(&huart2, "LED OFF\r\n\0",
+							strlen((char*) "LED OFF\r\n\0"));
+					LED_status = 0;
+					RxBuffer[0] = "";
+				}
+			} else if (RxBuffer[0] == 'x') {
+				HAL_UART_Transmit_IT(&huart2, "Now Menu Page!\r\n\0",
+						strlen((char*) "Now Menu Page!\r\n\0"));
+				status = 0; //Back to Menu
+				RxBuffer[0] = "";
+			}
+	  		  break;
+	  //@Button Status
+	  	  case 2:
+			if (RxBuffer[0] == 'x') {
+				HAL_UART_Transmit_IT(&huart2, "Now Menu Page!\r\n\0",
+						strlen((char*) "Now Menu Page!\r\n\0"));
+				status = 0; //Back to Menu
+				RxBuffer[0] = "";
+			}
+			if(current_flag == 0&&last_flag == 1)
+			{
+				HAL_UART_Transmit_IT(&huart2, "Button Status : Press!\r\n\0",
+						strlen((char*) "Button Status : Press!\r\n\0"));
+			}
+			else if (current_flag == 1 && last_flag == 0) {
+				HAL_UART_Transmit_IT(&huart2, "Button Status : UnPress!\r\n\0",
+						strlen((char*) "Button Status : UnPress!\r\n\0"));
+			}
+			last_flag = current_flag;
+			break;
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -217,30 +307,37 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-//void UARTPollingMethod()
-//{
-//	HAL_StatusTypeDef Status = HAL_UART_Receive(&huart2, RxBuffer , 1 ,10000); // 1 bit or 10000 ms to stop receive
-//
-//	//if read Data Complete
-//	if(Status == HAL_OK)
-//	{
-//		RxBuffer[1] = '\0'; //Close String
-//		//return recive char
-//		sprintf((char*)TxBuffer, "")
-//	}
-//	else if(Staus == HAL_TIMEOUT)
-//	{
-//
-//	}
-//}
-
 void LED()
 {
-	static uint32_t timestamp = 0;
-	if(HAL_GetTick() >= timestamp)
+	Hz = (1/(speed*2))*1000;
+	switch (LED_status) {
+	case 0:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, RESET);
+		break;
+	case 1:
+		if (HAL_GetTick() >= timestamp) {
+			HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+			timestamp = HAL_GetTick() + Hz;
+		}
+		break;
+	}
+}
+
+void UARTInteruptConfig()
+{
+	HAL_UART_Receive_IT(&huart2 , RxBuffer , 1);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(huart == &huart2)
 	{
-		timestamp = HAL_GetTick()+100;
-		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+		RxBuffer[1] = '\0';
+//		sprintf((char*)TxBuffer,"Receive : %s\r\n",RxBuffer);
+//		HAL_UART_Transmit_IT(&huart2 , TxBuffer, strlen((char*)TxBuffer));
+		//Recall receive
+		HAL_UART_Receive_IT(&huart2 , RxBuffer , 1);
+
 	}
 }
 /* USER CODE END 4 */
